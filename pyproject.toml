@@ -1,0 +1,32 @@
+[project]
+name = "scavenger"
+version = "0.1.0"
+description = "Automated task runner for Claude Code during inactive hours"
+readme = "README.md"
+authors = [
+    { name = "tat1218", email = "tat1218@naver.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pytest>=9.0.2",
+    "streamlit>=1.40.0",
+    "pexpect>=4.9.0",
+]
+
+[project.scripts]
+scavenger = "scavenger.cli.main:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"
