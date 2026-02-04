@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import Optional
 
-
 # ============================================================================
 # Directory Structure Constants
 # ============================================================================
@@ -18,7 +17,7 @@ DAEMON_LOG_FILE = "daemon.log"
 MAIN_LOG_FILE = "scavenger.log"
 PID_FILE = "scavenger.pid"
 WEB_PID_FILE = "web.pid"
-WEB_UI_PORT = 2077
+WEB_UI_PORT = 8121
 
 
 def get_base_dir(custom_dir: Optional[Path] = None) -> Path:
