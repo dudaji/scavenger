@@ -12,6 +12,12 @@ Scavenger is a CLI tool that automatically executes your Claude Code tasks durin
 
 ## English
 
+### Why Scavenger?
+
+If you use Claude Code during work hours, you've probably noticed this problem: **your session usage hits the limit quickly, but your weekly allocation still has plenty left over.**
+
+This happens because token usage is concentrated during active hours, leaving a significant portion of your weekly budget unused. Scavenger solves this by automatically running your queued tasks during off-peak hours (like overnight), effectively utilizing those leftover tokens that would otherwise go to waste.
+
 ### Features
 
 - **Smart Scheduling** - Configure active hours (e.g., 01:00-06:00) when tasks should run
@@ -261,6 +267,12 @@ Access the web dashboard at `http://localhost:8121` when the daemon is running. 
 ### 소개
 
 Scavenger는 야간 등 비활성 시간대에 Claude Code 작업을 자동으로 실행하는 CLI 도구입니다. 사용하지 않는 토큰 예산을 효율적으로 활용하여, 아침에 일어나면 완료된 작업과 상세 리포트를 확인할 수 있습니다.
+
+### 왜 Scavenger인가?
+
+Claude Code를 업무 시간에 사용하다 보면 이런 문제를 겪게 됩니다: **세션 사용량은 금방 한도에 도달하는데, 주간 사용량은 아직 많이 남아있습니다.**
+
+이는 토큰 사용이 특정 시간대(업무 시간)에 집중되기 때문에 발생합니다. 결국 주간 할당량의 상당 부분이 사용되지 않고 낭비됩니다. Scavenger는 대기열에 있는 작업들을 비활성 시간대(야간 등)에 자동으로 실행하여, 그냥 버려질 토큰들을 효과적으로 활용합니다.
 
 ### 주요 기능
 
