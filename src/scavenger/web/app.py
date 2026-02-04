@@ -148,13 +148,13 @@ def render_dashboard() -> None:
     with col2:
         limit = config.limits.get_limit_for_today()
         usage_info = get_usage_simple()
-        if usage_info:
-            current_pct = usage_info.percentage
-            delta_color = "normal" if current_pct < limit else "inverse"
+        if usage_info and usage_info.is_valid():
+            weekly_pct = usage_info.weekly_percent
+            delta_color = "normal" if weekly_pct < limit else "inverse"
             st.metric(
-                "Usage",
-                f"{current_pct:.0f}%",
-                delta=f"Limit: {limit}%",
+                "Weekly Usage",
+                f"{weekly_pct:.0f}%",
+                delta=f"Limit: {limit}% | Session: {usage_info.session_percent:.0f}%",
                 delta_color=delta_color,
             )
         else:

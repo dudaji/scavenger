@@ -80,12 +80,13 @@ class Scheduler:
 
         # Check usage limit
         usage = get_usage_simple(config.claude_code.path)
-        if usage:
-            limit = config.limits.get_limit_for_today()
-            if not usage.is_within_limit(limit):
-                return False, f"Usage limit reached ({usage.percentage:.1f}% >= {limit}%)"
-        else:
-            logger.debug("Unable to fetch current usage, proceeding anyway")
+        # If usage fetch failed (returns -1 or None), skip task execution
+        if not usage or not usage.is_valid():
+            return False, "Unable to fetch usage info, skipping task"
+
+        limit = config.limits.get_limit_for_today()
+        if not usage.is_within_limit(limit):
+            return False, f"Usage limit reached ({usage.weekly_percent:.1f}% >= {limit}%)"
 
         # Check if there are pending tasks
         next_task = self.task_storage.get_next_pending()

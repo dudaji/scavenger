@@ -1,135 +1,133 @@
 """Usage parser for Claude Code /usage command.
 
-Runs Claude CLI interactively to get usage information.
+Runs Claude CLI to get usage information.
 """
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 import pexpect
 
 logger = logging.getLogger(__name__)
 
-# Pattern to match usage lines like "claude-opus-4-5: 20%" or "Opus: 20%"
-USAGE_LINE_PATTERN = re.compile(r"([a-zA-Z0-9_-]+):\s*(\d+(?:\.\d+)?)\s*%")
+# ANSI escape code pattern for removing color/control characters
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+# Pattern to match "XX% used" format
+USAGE_PERCENT_PATTERN = re.compile(r"(\d+(?:\.\d+)?)%\s*used")
 
 
 @dataclass
 class UsageInfo:
-    """Parsed usage information from Claude /usage command."""
+    """Parsed usage information from Claude /usage command.
 
-    percentage: float
-    raw_output: str
-    model_usages: dict[str, float] = field(default_factory=dict)
+    Attributes:
+        session_percent: Current session usage percentage (-1 if failed to fetch)
+        weekly_percent: Weekly usage percentage (-1 if failed to fetch)
+        raw_output: Raw output from the command for debugging
+    """
+
+    session_percent: float
+    weekly_percent: float
+    raw_output: str = ""
 
     def is_within_limit(self, limit_percent: int) -> bool:
-        """Check if current usage is within the limit."""
-        return self.percentage < limit_percent
+        """Check if weekly usage is within the limit.
 
-    def get_max_usage(self) -> float:
-        """Get the maximum usage percentage across all models."""
-        if self.model_usages:
-            return max(self.model_usages.values())
-        return self.percentage
+        Returns False if usage couldn't be fetched (weekly_percent == -1).
+        """
+        if self.weekly_percent < 0:
+            return False
+        return self.weekly_percent < limit_percent
+
+    @property
+    def percentage(self) -> float:
+        """Alias for weekly_percent for backward compatibility."""
+        return self.weekly_percent
+
+    def is_valid(self) -> bool:
+        """Check if usage info was successfully fetched."""
+        return self.session_percent >= 0 and self.weekly_percent >= 0
 
 
-def parse_usage_output(output: str) -> Optional[UsageInfo]:
-    """Parse Claude /usage output to extract percentages.
+def _extract_usage_percent(raw_text: str) -> float:
+    """Extract usage percentage from text with ANSI codes.
 
-    Expected format:
-        claude-opus-4-5: 20%
-        claude-sonnet-4-5: 29%
-        claude-haiku-4-5: 18%
+    Args:
+        raw_text: Text that may contain ANSI escape codes.
+
+    Returns:
+        Extracted percentage (0-100), or -1 if not found or invalid.
     """
-    if not output:
-        return None
+    if not raw_text:
+        return -1.0
 
-    model_usages: dict[str, float] = {}
+    # Remove ANSI escape codes
+    clean_text = ANSI_ESCAPE_PATTERN.sub("", raw_text)
 
-    for match in USAGE_LINE_PATTERN.finditer(output):
-        name = match.group(1)
-        percentage = float(match.group(2))
-        model_usages[name] = percentage
+    # Match "XX% used" pattern
+    match = USAGE_PERCENT_PATTERN.search(clean_text)
+    if match:
+        value = float(match.group(1))
+        # Validate percentage range
+        if 0 <= value <= 100:
+            return value
 
-    if model_usages:
-        return UsageInfo(
-            percentage=max(model_usages.values()),
-            raw_output=output,
-            model_usages=model_usages,
-        )
-
-    return None
+    return -1.0
 
 
 def get_usage_simple(claude_path: str = "claude") -> Optional[UsageInfo]:
     """Get current usage by running Claude CLI /usage command.
 
-    Starts Claude in interactive mode, sends /usage, captures output, then exits.
+    Runs 'claude /usage' and parses session and weekly usage percentages.
 
     Args:
         claude_path: Path to Claude CLI executable.
 
     Returns:
-        UsageInfo with usage percentages, or None if failed.
+        UsageInfo with session and weekly percentages.
+        Returns UsageInfo with -1 values if failed to fetch.
     """
+    child = None
+
     try:
-        # Start Claude CLI
-        child = pexpect.spawn(
-            claude_path,
-            encoding="utf-8",
-            timeout=30,
+        # Run claude /usage command directly (same as test_usage.py)
+        command = f"{claude_path} /usage"
+        child = pexpect.spawn(command, encoding="utf-8", timeout=10)
+
+        # First "used" - Session Usage
+        child.expect("used")
+        session_raw = child.before + child.after
+        session_percent = _extract_usage_percent(session_raw)
+
+        # Second "used" - Weekly Usage
+        child.expect("used")
+        weekly_raw = child.before + child.after
+        weekly_percent = _extract_usage_percent(weekly_raw)
+
+        return UsageInfo(
+            session_percent=session_percent,
+            weekly_percent=weekly_percent,
+            raw_output=session_raw + weekly_raw,
         )
 
-        # Wait for Claude to be ready (look for prompt or just wait)
-        try:
-            child.expect([r"[>›]", r"\n"], timeout=10)
-        except pexpect.TIMEOUT:
-            pass
-
-        # Send /usage command
-        child.sendline("/usage")
-
-        # Collect output until we see percentages or timeout
-        output_buffer = []
-        try:
-            # Read output for a few seconds
-            while True:
-                index = child.expect([r"\d+%", pexpect.TIMEOUT, pexpect.EOF], timeout=5)
-                if index == 0:
-                    # Found a percentage, capture context
-                    output_buffer.append(child.before + child.after)
-                else:
-                    break
-        except (pexpect.TIMEOUT, pexpect.EOF):
-            pass
-
-        # Exit cleanly
-        try:
-            child.sendline("/exit")
-            child.expect(pexpect.EOF, timeout=5)
-        except (pexpect.TIMEOUT, pexpect.EOF):
-            pass
-        finally:
-            child.close()
-
-        # Parse collected output
-        full_output = "".join(output_buffer)
-        if full_output:
-            return parse_usage_output(full_output)
-
-        return None
-
-    except pexpect.exceptions.ExceptionPexpect as e:
-        logger.debug(f"pexpect error: {e}")
-        return None
+    except pexpect.TIMEOUT:
+        logger.debug("Timeout waiting for Claude CLI response")
+        return UsageInfo(session_percent=-1, weekly_percent=-1, raw_output="")
+    except pexpect.EOF:
+        logger.debug("Claude CLI process ended unexpectedly")
+        return UsageInfo(session_percent=-1, weekly_percent=-1, raw_output="")
     except FileNotFoundError:
         logger.debug(f"Claude CLI not found: {claude_path}")
-        return None
+        return UsageInfo(session_percent=-1, weekly_percent=-1, raw_output="")
     except Exception as e:
         logger.debug(f"Error getting usage: {e}")
-        return None
+        return UsageInfo(session_percent=-1, weekly_percent=-1, raw_output="")
+    finally:
+        if child:
+            child.close()
 
 
 # Alias for backward compatibility

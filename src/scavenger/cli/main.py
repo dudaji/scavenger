@@ -233,15 +233,17 @@ def status() -> None:
     with console.status("[dim]Fetching current usage...[/dim]"):
         usage_info = get_usage_simple()
 
-    if usage_info and usage_info.model_usages:
-        for metric, pct in sorted(usage_info.model_usages.items()):
-            color = "green" if pct < limit else "red"
-            console.print(f"  {metric}: [{color}]{pct:.0f}%[/{color}]")
-        if usage_info.percentage >= limit:
+    if usage_info and usage_info.is_valid():
+        # Show session usage
+        session_color = "green" if usage_info.session_percent < limit else "red"
+        console.print(f"  Session: [{session_color}]{usage_info.session_percent:.0f}%[/{session_color}]")
+
+        # Show weekly usage (used for limit comparison)
+        weekly_color = "green" if usage_info.weekly_percent < limit else "red"
+        console.print(f"  Weekly:  [{weekly_color}]{usage_info.weekly_percent:.0f}%[/{weekly_color}]")
+
+        if usage_info.weekly_percent >= limit:
             console.print("  [red]⚠ Usage limit exceeded![/red]")
-    elif usage_info:
-        color = "green" if usage_info.percentage < limit else "red"
-        console.print(f"  Current: [{color}]{usage_info.percentage:.0f}%[/{color}]")
     else:
         console.print("  [dim]Current: Unable to fetch[/dim]")
     console.print()
