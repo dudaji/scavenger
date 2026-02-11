@@ -85,6 +85,12 @@ class Daemon:
         if self.scheduler:
             self.scheduler.stop()
 
+    def _handle_reload(self, signum: int, frame) -> None:
+        """Handle config reload signal (SIGUSR1)."""
+        logger.info("Received config reload signal")
+        if self.scheduler:
+            self.scheduler.request_config_reload()
+
     def _daemonize(self) -> None:
         """Daemonize the process using double fork."""
         # First fork
@@ -146,6 +152,11 @@ class Daemon:
         # Setup signal handlers
         signal.signal(signal.SIGTERM, self._handle_signal)
         signal.signal(signal.SIGINT, self._handle_signal)
+        # SIGUSR1 for config reload (Unix only)
+        if hasattr(signal, "SIGUSR1"):
+            signal.signal(signal.SIGUSR1, self._handle_reload)
+        else:
+            logger.warning("SIGUSR1 not available, config reload signal disabled")
 
         logger.info(f"Daemon started with PID {os.getpid()}")
 

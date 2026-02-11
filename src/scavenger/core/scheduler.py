@@ -42,6 +42,7 @@ class Scheduler:
         self.check_interval = check_interval
         self._running = False
         self._stopping = False
+        self._reload_config = False
         self._current_task: Optional[Task] = None
         self._on_task_complete: Optional[Callable[[Task], None]] = None
         self._consecutive_errors = 0
@@ -63,6 +64,15 @@ class Scheduler:
     def get_current_task(self) -> Optional[Task]:
         """Get currently running task."""
         return self._current_task
+
+    def request_config_reload(self) -> None:
+        """Request immediate config reload and check.
+
+        Called when config changes (e.g., active hours modified).
+        This will interrupt the current wait and trigger an immediate check.
+        """
+        logger.info("Config reload requested, will check immediately")
+        self._reload_config = True
 
     def should_run(self, config: Config) -> tuple[bool, str]:
         """Check if scheduler should run tasks now.
@@ -185,7 +195,7 @@ class Scheduler:
                 if should_run:
                     self.run_next_task(config)
                 else:
-                    logger.debug(f"Skipping: {reason}")
+                    logger.info(f"Skipping: {reason}")
 
                 # Wait before next check (interruptible)
                 self._wait_interruptible(self.check_interval)
@@ -242,9 +252,13 @@ class Scheduler:
             logger.exception("Error sending daily report")
 
     def _wait_interruptible(self, seconds: int) -> None:
-        """Wait for specified seconds, but can be interrupted by stop()."""
+        """Wait for specified seconds, but can be interrupted by stop() or config reload."""
         for _ in range(seconds):
             if not self._running:
+                break
+            if self._reload_config:
+                self._reload_config = False
+                logger.info("Wait interrupted for config reload")
                 break
             time.sleep(1)
 

@@ -1,6 +1,8 @@
 """Configuration model for Scavenger."""
 
 import logging
+import os
+import signal
 from datetime import datetime, time
 from pathlib import Path
 from typing import Optional
@@ -10,6 +12,7 @@ from pydantic import BaseModel, Field
 from scavenger.utils.constants import (
     DEFAULT_CONFIG_FILE,
     DEFAULT_TIMEOUT_MINUTES,
+    PID_FILE,
     get_base_dir,
 )
 from scavenger.utils.storage_helpers import safe_json_load, safe_json_save
@@ -125,9 +128,49 @@ class ConfigStorage:
         data = safe_json_load(self.config_file, default=default_config.model_dump())
         return Config.model_validate(data)
 
-    def save(self, config: Config) -> None:
-        """Save configuration to file."""
+    def save(self, config: Config, notify: bool = True) -> None:
+        """Save configuration to file.
+
+        Args:
+            config: Configuration to save
+            notify: If True, notify running daemon to reload config immediately
+        """
         safe_json_save(self.config_file, config.model_dump())
+        if notify:
+            self.notify_daemon()
+
+    def notify_daemon(self) -> bool:
+        """Notify running daemon to reload config via SIGUSR1.
+
+        Returns:
+            True if signal was sent successfully, False otherwise
+        """
+        # SIGUSR1 is Unix only
+        if not hasattr(signal, "SIGUSR1"):
+            return False
+
+        pid_file = self.base_dir / PID_FILE
+        if not pid_file.exists():
+            return False
+
+        try:
+            with open(pid_file) as f:
+                pid = int(f.read().strip())
+
+            # Check if process is actually running before sending signal
+            try:
+                os.kill(pid, 0)  # Signal 0 checks if process exists
+            except OSError:
+                # Process doesn't exist, stale PID file
+                logger.debug(f"Daemon not running (stale PID {pid})")
+                return False
+
+            os.kill(pid, signal.SIGUSR1)
+            logger.info(f"Sent config reload signal to daemon (PID {pid})")
+            return True
+        except (ValueError, OSError, FileNotFoundError) as e:
+            logger.debug(f"Could not notify daemon: {e}")
+            return False
 
     def update(self, **kwargs) -> Config:
         """Update specific configuration values."""
