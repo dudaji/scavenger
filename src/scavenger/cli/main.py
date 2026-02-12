@@ -145,12 +145,12 @@ def run(
     executor = get_executor()
 
     if task_id:
-        task = storage.get(task_id)
+        task = storage.claim_by_id(task_id)
         if not task:
-            console.print(f"[red]Error:[/red] Task not found: {task_id}")
+            console.print(f"[red]Error:[/red] Task not found or not pending: {task_id}")
             raise typer.Exit(1)
     else:
-        task = storage.get_next_pending()
+        task = storage.claim_next_pending()
         if not task:
             console.print("[dim]No pending tasks to run.[/dim]")
             return
@@ -160,30 +160,33 @@ def run(
     console.print(f"  Directory: {task.working_dir}")
     console.print()
 
-    task.start()
-    storage.update(task)
+    try:
+        with console.status("[bold blue]Executing with Claude Code...[/bold blue]"):
+            result = executor.execute(
+                prompt=task.prompt,
+                working_dir=task.working_dir,
+                timeout_minutes=timeout,
+                task_id=task.id,
+            )
 
-    with console.status("[bold blue]Executing with Claude Code...[/bold blue]"):
-        result = executor.execute(
-            prompt=task.prompt,
-            working_dir=task.working_dir,
-            timeout_minutes=timeout,
-            task_id=task.id,
-        )
+        if result.success:
+            summary = result.output[:OUTPUT_SUMMARY_MAX_LENGTH] if result.output else "Completed"
+            task.complete(summary)
+            console.print("[green]Task completed successfully![/green]")
+            if result.output:
+                console.print("\n[bold]Output:[/bold]")
+                console.print(result.output)
+        else:
+            task.fail(result.error or "Unknown error")
+            console.print(f"[red]Task failed:[/red] {result.error}")
 
-    if result.success:
-        summary = result.output[:OUTPUT_SUMMARY_MAX_LENGTH] if result.output else "Completed"
-        task.complete(summary)
-        console.print("[green]Task completed successfully![/green]")
-        if result.output:
-            console.print("\n[bold]Output:[/bold]")
-            console.print(result.output)
-    else:
-        task.fail(result.error or "Unknown error")
-        console.print(f"[red]Task failed:[/red] {result.error}")
+    except Exception as e:
+        task.fail(str(e))
+        console.print(f"[red]Task failed with exception:[/red] {e}")
 
-    storage.update(task)
-    history_storage.record_execution(task)
+    finally:
+        storage.update(task)
+        history_storage.record_execution(task)
 
 
 @app.command()

@@ -121,15 +121,12 @@ class Scheduler:
 
     def run_next_task(self, config: Config) -> Optional[Task]:
         """Run the next pending task."""
-        task = self.task_storage.get_next_pending()
+        task = self.task_storage.claim_next_pending()
         if not task:
             return None
 
         self._current_task = task
         logger.info(f"Starting task {task.id}: {task.prompt[:50]}...")
-
-        task.start()
-        self.task_storage.update(task)
 
         try:
             result = self.executor.execute(
