@@ -1,6 +1,8 @@
 """Claude Code executor for Scavenger."""
 
 import logging
+import os
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,43 +72,61 @@ class ClaudeCodeExecutor:
         logger.info(f"Executing Claude Code in {working_dir}")
 
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
                 cwd=working_dir,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout_minutes * SECONDS_PER_MINUTE,
+                start_new_session=True,
             )
 
+            try:
+                stdout, stderr = proc.communicate(
+                    timeout=timeout_minutes * SECONDS_PER_MINUTE,
+                )
+            except subprocess.TimeoutExpired:
+                # Kill the entire process group to prevent zombie processes
+                self._kill_process_group(proc)
+
+                # Clean up pipe buffers to prevent resource leaks
+                try:
+                    proc.stdout.close()
+                except Exception:
+                    pass
+                try:
+                    proc.stderr.close()
+                except Exception:
+                    pass
+
+                error_msg = f"Task timed out after {timeout_minutes} minutes"
+                logger.error(error_msg)
+                if task_logger:
+                    task_logger.log_complete(False, error_msg)
+                return ExecutionResult(
+                    success=False,
+                    output="",
+                    error=error_msg,
+                    return_code=-1,
+                )
+
             if task_logger:
-                if result.stdout:
-                    task_logger.log_output(result.stdout)
-                if result.stderr:
-                    task_logger.error(f"stderr: {result.stderr}")
+                if stdout:
+                    task_logger.log_output(stdout)
+                if stderr:
+                    task_logger.error(f"stderr: {stderr}")
 
             exec_result = ExecutionResult(
-                success=result.returncode == 0,
-                output=result.stdout,
-                error=result.stderr if result.returncode != 0 else None,
-                return_code=result.returncode,
+                success=proc.returncode == 0,
+                output=stdout,
+                error=stderr if proc.returncode != 0 else None,
+                return_code=proc.returncode,
             )
 
             if task_logger:
                 task_logger.log_complete(exec_result.success, exec_result.error or "")
 
             return exec_result
-
-        except subprocess.TimeoutExpired:
-            error_msg = f"Task timed out after {timeout_minutes} minutes"
-            logger.error(error_msg)
-            if task_logger:
-                task_logger.log_complete(False, error_msg)
-            return ExecutionResult(
-                success=False,
-                output="",
-                error=error_msg,
-                return_code=-1,
-            )
         except FileNotFoundError:
             error_msg = f"Claude Code CLI not found at: {self.claude_path}"
             logger.error(error_msg)
@@ -129,6 +149,31 @@ class ClaudeCodeExecutor:
                 error=error_msg,
                 return_code=-1,
             )
+
+    @staticmethod
+    def _kill_process_group(proc: subprocess.Popen) -> None:
+        """Kill a process and its entire process group."""
+        try:
+            pgid = os.getpgid(proc.pid)
+        except (ProcessLookupError, OSError):
+            return  # Already dead
+
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            return
+
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.critical(f"Process {proc.pid} survived SIGKILL")
 
     def check_usage(self) -> Optional[str]:
         """Get current usage from Claude Code /usage command."""
