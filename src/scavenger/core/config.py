@@ -59,6 +59,7 @@ class UsageLimits(BaseModel):
     usage_limit_default: int = 20
     usage_reset_hour: int = 6
     task_timeout_minutes: int = DEFAULT_TIMEOUT_MINUTES
+    session_limit_percent: int = 90
 
     def get_limit_for_today(self) -> int:
         """Get usage limit for current day considering reset hour."""
