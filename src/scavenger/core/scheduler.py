@@ -94,6 +94,10 @@ class Scheduler:
         if not usage or not usage.is_valid():
             return False, "Unable to fetch usage info, skipping task"
 
+        # Check session usage limit
+        if usage.session_percent > config.limits.session_limit_percent:
+            return False, f"Session usage limit reached ({usage.session_percent:.1f}% > {config.limits.session_limit_percent}%)"
+
         limit = config.limits.get_limit_for_today()
         if not usage.is_within_limit(limit):
             return False, f"Usage limit reached ({usage.weekly_percent:.1f}% >= {limit}%)"
