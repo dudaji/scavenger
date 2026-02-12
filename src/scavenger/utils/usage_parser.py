@@ -4,8 +4,10 @@ Runs Claude CLI to get usage information.
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import pexpect
@@ -93,17 +95,47 @@ def get_usage_simple(claude_path: str = "claude") -> Optional[UsageInfo]:
     child = None
 
     try:
-        # Run claude /usage command directly (same as test_usage.py)
         command = f"{claude_path} /usage"
-        child = pexpect.spawn(command, encoding="utf-8", timeout=10)
+        home = str(Path.home())
+        child = pexpect.spawn(command, encoding="utf-8", timeout=20, cwd=home)
 
-        # First "used" - Session Usage
-        child.expect("used")
+        
+
+        # 데몬(setsid) 환경에서는 workspace trust 프롬프트가 뜰 수 있음
+        # trust 프롬프트가 나오면 Enter로 수락 후 진행
+        # ANSI 코드가 섞여 있을 수 있으므로 Regex로 처리
+        idx = child.expect(["used", "trust.*this.*folder", pexpect.TIMEOUT, pexpect.EOF], timeout=10)
+        
+        if idx == 1:
+            # trust 프롬프트 감지됨
+            try:
+                # "Enter to confirm" 까지 확실히 읽어서 버퍼 비우기
+                child.expect(["Enter.*to.*confirm", pexpect.TIMEOUT], timeout=3)
+            except:
+                pass
+            
+            # 명시적으로 \r 전송 (Enter)
+            child.send("\r")
+            
+            # trust 수락 후 다시 "used" 대기 (Session Usage가 됨)
+            # 이 expect가 성공하면 idx는 0이 됨
+            idx = child.expect(["used", pexpect.TIMEOUT, pexpect.EOF], timeout=20)
+
+        # 위에서 idx가 0이면 (바로 잡혔거나 trust 처리 후 잡혔거나) Session Usage 처리
+        if idx != 0:
+             logger.debug(f"Failed to find session usage 'used' marker (idx={idx})")
+             return UsageInfo(session_percent=-1, weekly_percent=-1, raw_output=getattr(child, "before", "") or "")
+
+        # First "used" data is now in child.before/after
         session_raw = child.before + child.after
         session_percent = _extract_usage_percent(session_raw)
 
         # Second "used" - Weekly Usage
-        child.expect("used")
+        idx_weekly = child.expect(["used", pexpect.TIMEOUT, pexpect.EOF], timeout=10)
+        if idx_weekly != 0:
+            logger.debug(f"Failed to find weekly usage 'used' marker (idx={idx_weekly})")
+            return UsageInfo(session_percent=session_percent, weekly_percent=-1, raw_output=session_raw + (getattr(child, "before", "") or ""))
+            
         weekly_raw = child.before + child.after
         weekly_percent = _extract_usage_percent(weekly_raw)
 
@@ -114,8 +146,8 @@ def get_usage_simple(claude_path: str = "claude") -> Optional[UsageInfo]:
         )
 
     except pexpect.TIMEOUT:
-        logger.debug("Timeout waiting for Claude CLI response")
-        return UsageInfo(session_percent=-1, weekly_percent=-1, raw_output="")
+        logger.debug("Timeout waiting for Claude CLI response (v2)")
+        return UsageInfo(session_percent=-1, weekly_percent=-1, raw_output=getattr(child, "before", "") or "")
     except pexpect.EOF:
         logger.debug("Claude CLI process ended unexpectedly")
         return UsageInfo(session_percent=-1, weekly_percent=-1, raw_output="")
