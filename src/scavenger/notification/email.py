@@ -36,7 +36,10 @@ class EmailSender:
     def _get_smtp_password(self) -> Optional[str]:
         """Get SMTP password from environment variable."""
         env_var = self.config.smtp.password_env
-        return os.environ.get(env_var)
+        password = os.environ.get(env_var)
+        if password:
+            password = password.strip().replace('\xa0', ' ').strip()
+        return password
 
     def is_configured(self) -> bool:
         """Check if email is properly configured."""
